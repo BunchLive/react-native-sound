@@ -177,35 +177,61 @@ RCT_EXPORT_METHOD(prepare:(NSString*)fileName
                   withKey:(nonnull NSNumber*)key
                   withOptions:(NSDictionary*)options
                   withCallback:(RCTResponseSenderBlock)callback) {
-  NSError* error;
-  NSURL* fileNameUrl;
-  AVAudioPlayer* player;
-
-  if ([fileName hasPrefix:@"http"]) {
-    fileNameUrl = [NSURL URLWithString:[fileName stringByRemovingPercentEncoding]];
-    NSData* data = [NSData dataWithContentsOfURL:fileNameUrl];
+  void (^dataProcessor)(NSData *) = ^void(NSData *data) {
+    AVAudioPlayer* player;
+    NSError* error;
     player = [[AVAudioPlayer alloc] initWithData:data error:&error];
-  }
-  else if ([fileName hasPrefix:@"ipod-library://"]) {
+    if (player) {
+      player.delegate = self;
+      player.enableRate = YES;
+      [player prepareToPlay];
+      [[self playerPool] setObject:player forKey:key];
+      callback(@[[NSNull null], @{@"duration": @(player.duration),
+                                  @"numberOfChannels": @(player.numberOfChannels)}]);
+    } else {
+      callback(@[RCTJSErrorFromNSError(error)]);
+    }
+  };
+  
+  NSURL* fileNameUrl;
+  if ([fileName hasPrefix:@"http"]) {
     fileNameUrl = [NSURL URLWithString:fileName];
-    player = [[AVAudioPlayer alloc] initWithContentsOfURL:fileNameUrl error:&error];
+    NSURLRequest *request = [NSMutableURLRequest requestWithURL:fileNameUrl];
+    NSURLCache *cache = [NSURLCache sharedURLCache];
+    NSCachedURLResponse *response = [cache cachedResponseForRequest:request];
+    if(response) {
+      dataProcessor(response.data);
+    }
+    else
+    {
+      NSURLSessionConfiguration *defaultConfigObject =
+      [NSURLSessionConfiguration defaultSessionConfiguration];
+      NSURLSession *defaultSession;
+      defaultSession = [NSURLSession sessionWithConfiguration: defaultConfigObject
+                                                     delegate: nil
+                                                delegateQueue: [NSOperationQueue mainQueue]];
+      
+      NSURLSessionDataTask *task;
+      task = [defaultSession
+              dataTaskWithRequest:request
+              completionHandler:^(NSData * _Nullable data,
+                                  NSURLResponse * _Nullable response,
+                                  NSError * _Nullable error) {
+                if (data != nil && response != nil) {
+                  NSCachedURLResponse *cachedResponse;
+                  cachedResponse = [[NSCachedURLResponse alloc] initWithResponse:response
+                                                                            data:data];
+                  [cache storeCachedResponse:cachedResponse forRequest:request];
+                  dataProcessor(data);
+                }
+              }];
+      [task resume];
+    }
   }
   else {
     fileNameUrl = [NSURL fileURLWithPath:[fileName stringByRemovingPercentEncoding]];
-    player = [[AVAudioPlayer alloc]
-              initWithContentsOfURL:fileNameUrl
-              error:&error];
-  }
-
-  if (player) {
-    player.delegate = self;
-    player.enableRate = YES;
-    [player prepareToPlay];
-    [[self playerPool] setObject:player forKey:key];
-    callback(@[[NSNull null], @{@"duration": @(player.duration),
-                                @"numberOfChannels": @(player.numberOfChannels)}]);
-  } else {
-    callback(@[RCTJSErrorFromNSError(error)]);
+    NSData *data = [NSData dataWithContentsOfURL:fileNameUrl];
+    dataProcessor(data);
   }
 }
 
