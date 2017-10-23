@@ -169,7 +169,7 @@ RCT_EXPORT_METHOD(setCategory:(NSString *)categoryName
 
 RCT_EXPORT_METHOD(enableInSilenceMode:(BOOL)enabled) {
   AVAudioSession *session = [AVAudioSession sharedInstance];
-  [session setCategory: AVAudioSessionCategoryPlayback error: nil];
+  [session setCategory: AVAudioSessionCategoryAmbient error: nil];
   [session setActive: enabled error: nil];
 }
 
